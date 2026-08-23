@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
   delta_removed       INTEGER NOT NULL DEFAULT 0,
   source_limitations  JSONB NOT NULL DEFAULT '[]'::jsonb,
   published_artifact_cid TEXT,
-  ipns_pointer        TEXT
+  ipns_pointer        TEXT,
+  query_table_cid     TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_county_started

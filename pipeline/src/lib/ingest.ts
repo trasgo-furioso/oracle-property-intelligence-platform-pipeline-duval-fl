@@ -659,75 +659,10 @@ export async function runIngestion(options: IngestionOptions): Promise<void> {
     }
   }
 
-  // Step 5: Publish to Filebase (non-fatal — failures are logged but don't fail the run)
-  console.info('\n[5/8] Publishing to Filebase...');
-  let publishedArtifactCid: string | null = null;
-  let ipnsPointer: string | null = null;
-
-  try {
-    const bkt = filebaseBucket();
-    const allProps = await pool.query<PropertyRecord>(
-      `SELECT uuid, parcel_id, address, county_jurisdiction,
-              assessed_value, market_value, ownership, current_owner,
-              permits, structure, lot, coordinates, tax,
-              provenance, derived_signals, content_hash,
-              created_at, updated_at
-       FROM properties
-       WHERE county_jurisdiction = $1
-       ORDER BY parcel_id`,
-      [county],
-    );
-
-    const properties: PropertyRecord[] = allProps.rows.map((row) => ({
-      ...row,
-      address: typeof row.address === 'string' ? JSON.parse(row.address) : row.address,
-      ownership: typeof row.ownership === 'string' ? JSON.parse(row.ownership) : row.ownership,
-      current_owner: typeof row.current_owner === 'string' ? JSON.parse(row.current_owner) : row.current_owner,
-      permits: typeof row.permits === 'string' ? JSON.parse(row.permits) : row.permits,
-      structure: typeof row.structure === 'string' ? JSON.parse(row.structure) : row.structure,
-      lot: typeof row.lot === 'string' ? JSON.parse(row.lot) : row.lot,
-      coordinates: typeof row.coordinates === 'string' ? JSON.parse(row.coordinates) : row.coordinates,
-      tax: typeof row.tax === 'string' ? JSON.parse(row.tax) : row.tax,
-      provenance: typeof row.provenance === 'string' ? JSON.parse(row.provenance) : row.provenance,
-      derived_signals: typeof row.derived_signals === 'string' ? JSON.parse(row.derived_signals) : row.derived_signals,
-    }));
-
-    if (properties.length > 0) {
-      // Per-property JSON publish SKIPPED — hits Filebase free-tier 500 pin limit.
-      // The query-table Parquet (step 6) is the canonical queryable artifact.
-      console.info(`  Skipping per-property JSON publish (${properties.length} properties — exceeds pin limit)`);
-
-      // Upload index.json
-      const indexKey = `${KEY_PREFIX.openData}index.json`;
-      const indexData = {
-        county,
-        property_count: properties.length,
-        published_at: new Date().toISOString(),
-        run_id: runId,
-      };
-      await uploadJson(bkt, indexKey, indexData);
-
-      // Get CID from Filebase
-      publishedArtifactCid = await getCid(bkt, indexKey);
-
-      // Update IPNS pointer
-      if (publishedArtifactCid) {
-        const ipnsResult = await upsertName(IPNS_LABEL, publishedArtifactCid);
-        ipnsPointer = ipnsResult.network_key;
-        console.info(`  Published: cid=${publishedArtifactCid}, ipns=${ipnsPointer}`);
-      } else {
-        console.warn('  Published files but could not retrieve CID from Filebase');
-      }
-    } else {
-      console.info('  No properties to publish, skipping');
-    }
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    console.error(`  Publish to Filebase failed (non-fatal): ${error}`);
-  }
-
-  // Step 6: Publish query table Parquet to Filebase (non-fatal)
-  console.info('\n[6/8] Publishing query table Parquet...');
+  // Step 5: Publish query table Parquet to Filebase (non-fatal)
+  // NOTE: Parquet is published BEFORE index.json so its CID can be embedded in the index.
+  // This enables CRM discovery: IPNS -> index.json -> query_table_cid -> Parquet file.
+  console.info('\n[5/8] Publishing query table Parquet...');
   let queryTableCid: string | null = null;
 
   try {
@@ -789,6 +724,81 @@ export async function runIngestion(options: IngestionOptions): Promise<void> {
     console.error(`  Query table Parquet publish failed (non-fatal): ${error}`);
   }
 
+  // Step 6: Publish index.json to Filebase and update IPNS (non-fatal)
+  // index.json now includes query_table_cid so CRM can resolve: IPNS -> index -> Parquet CID.
+  console.info('\n[6/8] Publishing index.json to Filebase...');
+  let publishedArtifactCid: string | null = null;
+  let ipnsPointer: string | null = null;
+
+  try {
+    const bkt = filebaseBucket();
+    const allProps = await pool.query<PropertyRecord>(
+      `SELECT uuid, parcel_id, address, county_jurisdiction,
+              assessed_value, market_value, ownership, current_owner,
+              permits, structure, lot, coordinates, tax,
+              provenance, derived_signals, content_hash,
+              created_at, updated_at
+       FROM properties
+       WHERE county_jurisdiction = $1
+       ORDER BY parcel_id`,
+      [county],
+    );
+
+    const properties: PropertyRecord[] = allProps.rows.map((row) => ({
+      ...row,
+      address: typeof row.address === 'string' ? JSON.parse(row.address) : row.address,
+      ownership: typeof row.ownership === 'string' ? JSON.parse(row.ownership) : row.ownership,
+      current_owner: typeof row.current_owner === 'string' ? JSON.parse(row.current_owner) : row.current_owner,
+      permits: typeof row.permits === 'string' ? JSON.parse(row.permits) : row.permits,
+      structure: typeof row.structure === 'string' ? JSON.parse(row.structure) : row.structure,
+      lot: typeof row.lot === 'string' ? JSON.parse(row.lot) : row.lot,
+      coordinates: typeof row.coordinates === 'string' ? JSON.parse(row.coordinates) : row.coordinates,
+      tax: typeof row.tax === 'string' ? JSON.parse(row.tax) : row.tax,
+      provenance: typeof row.provenance === 'string' ? JSON.parse(row.provenance) : row.provenance,
+      derived_signals: typeof row.derived_signals === 'string' ? JSON.parse(row.derived_signals) : row.derived_signals,
+    }));
+
+    if (properties.length > 0) {
+      // Per-property JSON publish SKIPPED — hits Filebase free-tier 500 pin limit.
+      // The query-table Parquet (step 5) is the canonical queryable artifact.
+      console.info(`  Skipping per-property JSON publish (${properties.length} properties — exceeds pin limit)`);
+
+      // Upload index.json — includes Parquet CID for CRM discovery
+      const indexKey = `${KEY_PREFIX.openData}index.json`;
+      const indexData: Record<string, unknown> = {
+        county,
+        property_count: properties.length,
+        published_at: new Date().toISOString(),
+        run_id: runId,
+      };
+
+      // Embed Parquet CID so CRM can discover the query table via IPNS -> index.json
+      if (queryTableCid) {
+        indexData.query_table_cid = queryTableCid;
+        indexData.query_table_url = `https://ipfs.filebase.io/ipfs/${queryTableCid}`;
+      }
+
+      await uploadJson(bkt, indexKey, indexData);
+
+      // Get CID from Filebase
+      publishedArtifactCid = await getCid(bkt, indexKey);
+
+      // Update IPNS pointer
+      if (publishedArtifactCid) {
+        const ipnsResult = await upsertName(IPNS_LABEL, publishedArtifactCid);
+        ipnsPointer = ipnsResult.network_key;
+        console.info(`  Published: cid=${publishedArtifactCid}, ipns=${ipnsPointer}`);
+      } else {
+        console.warn('  Published files but could not retrieve CID from Filebase');
+      }
+    } else {
+      console.info('  No properties to publish, skipping');
+    }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.error(`  Publish to Filebase failed (non-fatal): ${error}`);
+  }
+
   // Step 7: Publish dataset-coverage.json (oracle convention, non-fatal)
   console.info('\n[7/8] Publishing dataset-coverage.json...');
   try {
@@ -812,6 +822,7 @@ export async function runIngestion(options: IngestionOptions): Promise<void> {
       total_properties: coverageTotalRecords,
       ipns_pointer: ipnsPointer,
       artifact_cid: publishedArtifactCid,
+      query_table_cid: queryTableCid,
     };
 
     const coverageKey = `${KEY_PREFIX.datasetCoverage}${county}/dataset-coverage.json`;
@@ -837,9 +848,10 @@ export async function runIngestion(options: IngestionOptions): Promise<void> {
          delta_new = $4, delta_updated = $5, delta_removed = $6,
          source_limitations = $7,
          published_artifact_cid = $8,
-         ipns_pointer = $9
+         ipns_pointer = $9,
+         query_table_cid = $10
      WHERE run_id = $1`,
-    [runId, status, totalRecords, totalDelta.new_count, totalDelta.updated_count, totalDelta.removed_count, JSON.stringify(limitations), publishedArtifactCid, ipnsPointer],
+    [runId, status, totalRecords, totalDelta.new_count, totalDelta.updated_count, totalDelta.removed_count, JSON.stringify(limitations), publishedArtifactCid, ipnsPointer, queryTableCid],
   );
 
   const totalDuration = Date.now() - startTime;
@@ -854,6 +866,7 @@ export async function runIngestion(options: IngestionOptions): Promise<void> {
   console.info(`  Updated:       ${totalDelta.updated_count}`);
   console.info(`  Removed:       ${totalDelta.removed_count}`);
   console.info(`  Published CID: ${publishedArtifactCid ?? 'none'}`);
+  console.info(`  Query Table:   ${queryTableCid ?? 'none'}`);
   console.info(`  IPNS Pointer:  ${ipnsPointer ?? 'none'}`);
   console.info(`  Duration:      ${totalDuration}ms`);
   if (limitations.length > 0) {

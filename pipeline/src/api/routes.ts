@@ -30,6 +30,8 @@ interface StatsResponse {
   ipnsStatus: 'live' | 'stale' | 'pending';
   ipnsPointer: string | null;
   artifactCid: string | null;
+  queryTableCid: string | null;
+  queryTableUrl: string | null;
   sourceCount: number;
   healthySources: number;
 }
@@ -47,6 +49,8 @@ interface RunListItem {
   source_limitations: string[];
   published_artifact_cid: string | null;
   ipns_pointer: string | null;
+  query_table_cid: string | null;
+  query_table_url: string | null;
 }
 
 interface RunDetail extends RunListItem {
@@ -97,9 +101,10 @@ export function createApiRoutes(): Hono {
         delta_removed: number;
         published_artifact_cid: string | null;
         ipns_pointer: string | null;
+        query_table_cid: string | null;
       }>(
         `SELECT run_id, started_at, status, delta_new, delta_updated, delta_removed,
-                published_artifact_cid, ipns_pointer
+                published_artifact_cid, ipns_pointer, query_table_cid
          FROM pipeline_runs ORDER BY started_at DESC LIMIT 1`,
       );
 
@@ -133,6 +138,10 @@ export function createApiRoutes(): Hono {
         ipnsStatus,
         ipnsPointer: lastRun?.ipns_pointer ?? null,
         artifactCid: lastRun?.published_artifact_cid ?? null,
+        queryTableCid: lastRun?.query_table_cid ?? null,
+        queryTableUrl: lastRun?.query_table_cid
+          ? `https://ipfs.filebase.io/ipfs/${lastRun.query_table_cid}`
+          : null,
         sourceCount: parseInt(sourceCount?.total ?? '0', 10),
         healthySources: parseInt(sourceCount?.healthy ?? '0', 10),
       };
@@ -147,6 +156,8 @@ export function createApiRoutes(): Hono {
         ipnsStatus: 'pending',
         ipnsPointer: null,
         artifactCid: null,
+        queryTableCid: null,
+        queryTableUrl: null,
         sourceCount: 0,
         healthySources: 0,
       } satisfies StatsResponse);
@@ -178,10 +189,12 @@ export function createApiRoutes(): Hono {
         source_limitations: string[] | string;
         published_artifact_cid: string | null;
         ipns_pointer: string | null;
+        query_table_cid: string | null;
       }>(
         `SELECT run_id, county, started_at, completed_at, status,
                 record_count, delta_new, delta_updated, delta_removed,
-                source_limitations, published_artifact_cid, ipns_pointer
+                source_limitations, published_artifact_cid, ipns_pointer,
+                query_table_cid
          FROM pipeline_runs
          ORDER BY started_at DESC
          LIMIT $1 OFFSET $2`,
@@ -205,6 +218,10 @@ export function createApiRoutes(): Hono {
             : [],
         published_artifact_cid: r.published_artifact_cid,
         ipns_pointer: r.ipns_pointer,
+        query_table_cid: r.query_table_cid,
+        query_table_url: r.query_table_cid
+          ? `https://ipfs.filebase.io/ipfs/${r.query_table_cid}`
+          : null,
       }));
 
       return c.json({ runs, total, page, limit });
@@ -232,10 +249,12 @@ export function createApiRoutes(): Hono {
         source_limitations: string[] | string;
         published_artifact_cid: string | null;
         ipns_pointer: string | null;
+        query_table_cid: string | null;
       }>(
         `SELECT run_id, county, started_at, completed_at, status,
                 record_count, delta_new, delta_updated, delta_removed,
-                source_limitations, published_artifact_cid, ipns_pointer
+                source_limitations, published_artifact_cid, ipns_pointer,
+                query_table_cid
          FROM pipeline_runs WHERE run_id = $1`,
         [runId],
       );
@@ -279,6 +298,10 @@ export function createApiRoutes(): Hono {
             : [],
         published_artifact_cid: run.published_artifact_cid,
         ipns_pointer: run.ipns_pointer,
+        query_table_cid: run.query_table_cid,
+        query_table_url: run.query_table_cid
+          ? `https://ipfs.filebase.io/ipfs/${run.query_table_cid}`
+          : null,
         sources: sources.map((s) => ({
           source_id: s.source_id,
           source_name: s.source_name ?? s.source_id,
