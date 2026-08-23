@@ -3,7 +3,7 @@
  * Called by the CLI script and the POST /api/runs/trigger route.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -876,4 +876,90 @@ export async function runIngestion(options: IngestionOptions): Promise<void> {
     }
   }
   console.info('='.repeat(60));
+
+  // ── Webhook dispatch (non-blocking, non-fatal) ──────────────────────────
+  if (publishedArtifactCid && ipnsPointer) {
+    try {
+      const webhookUrls = (process.env.WEBHOOK_URLS ?? '')
+        .split(',')
+        .map((u) => u.trim())
+        .filter((u) => u.length > 0);
+
+      if (webhookUrls.length === 0) {
+        console.info('\n[webhook] No WEBHOOK_URLS configured, skipping dispatch');
+      } else {
+        const webhookSecret = process.env.WEBHOOK_SECRET ?? '';
+        const eventId = randomUUID();
+        const event = {
+          event_id: eventId,
+          event_type: 'artifact.published',
+          county,
+          run_id: runId,
+          ipns_pointer: ipnsPointer,
+          artifact_cid: publishedArtifactCid,
+          timestamp: new Date().toISOString(),
+          delta: {
+            new_count: totalDelta.new_count,
+            updated_count: totalDelta.updated_count,
+            removed_count: totalDelta.removed_count,
+            new_parcel_ids: [],
+            updated_parcel_ids: [],
+            removed_parcel_ids: [],
+          },
+        };
+        const body = JSON.stringify(event);
+        const signature = createHmac('sha256', webhookSecret).update(body).digest('hex');
+
+        console.info(`\n[webhook] Dispatching event ${eventId} to ${webhookUrls.length} URL(s)`);
+
+        for (const url of webhookUrls) {
+          const startMs = Date.now();
+          let lastError: string | null = null;
+          let delivered = false;
+          const maxAttempts = 3;
+
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            if (attempt > 0) {
+              const delay = [5_000, 30_000][attempt - 1] ?? 5_000;
+              console.info(`[webhook] Retry ${attempt}/${maxAttempts} for ${url} after ${delay}ms`);
+              await new Promise((r) => setTimeout(r, delay));
+            }
+            try {
+              const controller = new AbortController();
+              const tid = setTimeout(() => controller.abort(), 10_000);
+              const resp = await fetch(url, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Event-Id': eventId,
+                  'X-Webhook-Signature': signature,
+                },
+                body,
+                signal: controller.signal,
+              });
+              clearTimeout(tid);
+              if (resp.ok) {
+                console.info(`[webhook] ${url} => ${resp.status} (${Date.now() - startMs}ms)`);
+                delivered = true;
+                break;
+              }
+              lastError = `HTTP ${resp.status}: ${resp.statusText}`;
+              console.warn(`[webhook] ${url} returned ${resp.status} on attempt ${attempt + 1}`);
+            } catch (err) {
+              lastError = err instanceof Error ? err.message : String(err);
+              console.warn(`[webhook] ${url} attempt ${attempt + 1} failed: ${lastError}`);
+            }
+          }
+          if (!delivered) {
+            console.error(`[webhook] ${url} delivery failed after ${maxAttempts} attempts: ${lastError}`);
+          }
+        }
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      console.error(`[webhook] Dispatch failed (non-fatal): ${error}`);
+    }
+  } else {
+    console.info('\n[webhook] Skipping dispatch (no published artifact or IPNS pointer)');
+  }
 }
