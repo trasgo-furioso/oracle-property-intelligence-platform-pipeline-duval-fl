@@ -171,7 +171,7 @@ describe('US1 — Continuous Incremental Ingestion', () => {
         expect(prop.source_count).toBeDefined();
         expect(Number(prop.source_count)).toBeGreaterThanOrEqual(1);
         expect(prop.reconciliation_confidence).toBeDefined();
-        expect(prop.last_pipeline_run).toBeDefined();
+        expect(prop.provenance_last_run).toBeDefined();
       }
     },
     { timeout: 30_000 },

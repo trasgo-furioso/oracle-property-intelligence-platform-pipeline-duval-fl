@@ -197,7 +197,7 @@ queryRoutes.get('/api/properties/search', async (c) => {
         ${def.signalColumn} as signal_value,
         source_count,
         reconciliation_confidence,
-        last_pipeline_run,
+        provenance_last_run,
         roof_age_years,
         ownership_tenure_years,
         is_regional_owner,

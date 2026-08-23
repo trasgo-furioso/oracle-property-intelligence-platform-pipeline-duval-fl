@@ -18,9 +18,9 @@ export function flattenProperty(prop: PropertyRecord): Record<string, unknown> {
     uuid: prop.uuid,
     parcel_id: prop.parcel_id,
     street: prop.address?.street ?? null,
-    city: prop.address?.city ?? null,
+    address_city: prop.address?.city ?? null,
     state: prop.address?.state ?? null,
-    zip: prop.address?.zip ?? null,
+    address_zip: prop.address?.zip ?? null,
     full_address: prop.address?.full ?? null,
     county_jurisdiction: prop.county_jurisdiction,
     assessed_value: prop.assessed_value,
@@ -57,7 +57,11 @@ export function flattenProperty(prop: PropertyRecord): Record<string, unknown> {
     // Provenance summary
     source_count: prop.provenance?.contributing_sources?.length ?? 0,
     reconciliation_confidence: prop.provenance?.reconciliation_confidence ?? null,
-    last_pipeline_run: prop.provenance?.last_pipeline_run ?? null,
+    provenance_last_run: prop.provenance?.last_pipeline_run ?? null,
+    provenance_sources: prop.provenance?.contributing_sources?.join(', ') ?? null,
+    provenance_timestamps: prop.provenance?.collection_timestamps
+      ? JSON.stringify(prop.provenance.collection_timestamps)
+      : null,
   };
 }
 
@@ -74,9 +78,9 @@ export async function buildParquetBuffer(rows: Record<string, unknown>[]): Promi
     uuid: { type: 'UTF8' },
     parcel_id: { type: 'UTF8' },
     street: { type: 'UTF8', optional: true },
-    city: { type: 'UTF8', optional: true },
+    address_city: { type: 'UTF8', optional: true },
     state: { type: 'UTF8', optional: true },
-    zip: { type: 'UTF8', optional: true },
+    address_zip: { type: 'UTF8', optional: true },
     full_address: { type: 'UTF8', optional: true },
     county_jurisdiction: { type: 'UTF8' },
     assessed_value: { type: 'DOUBLE', optional: true },
@@ -111,7 +115,9 @@ export async function buildParquetBuffer(rows: Record<string, unknown>[]): Promi
     within_walking_starbucks: { type: 'BOOLEAN', optional: true },
     source_count: { type: 'INT32', optional: true },
     reconciliation_confidence: { type: 'DOUBLE', optional: true },
-    last_pipeline_run: { type: 'UTF8', optional: true },
+    provenance_last_run: { type: 'UTF8', optional: true },
+    provenance_sources: { type: 'UTF8', optional: true },
+    provenance_timestamps: { type: 'UTF8', optional: true },
   });
 
   // parquetjs-lite only has openFile/openStream — write to temp file, read back

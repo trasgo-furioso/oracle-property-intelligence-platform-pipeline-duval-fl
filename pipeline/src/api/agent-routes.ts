@@ -90,7 +90,7 @@ RULES:
 
 AVAILABLE COLUMNS on the "properties" table (flat Parquet schema, no nested JSON):
 - parcel_id (VARCHAR), uuid (VARCHAR)
-- full_address (VARCHAR), street (VARCHAR), city (VARCHAR), state (VARCHAR), zip (VARCHAR)
+- full_address (VARCHAR), street (VARCHAR), address_city (VARCHAR), state (VARCHAR), address_zip (VARCHAR)
 - county_jurisdiction (VARCHAR)
 - assessed_value (DOUBLE), market_value (DOUBLE)
 - current_owner_name (VARCHAR), current_owner_type (VARCHAR)
@@ -103,7 +103,8 @@ AVAILABLE COLUMNS on the "properties" table (flat Parquet schema, no nested JSON
 - is_regional_owner (BOOLEAN), water_proximity_ft (DOUBLE), is_waterfront (BOOLEAN)
 - transit_distance_mi (DOUBLE), starbucks_distance_mi (DOUBLE)
 - within_walking_transit (BOOLEAN), within_walking_starbucks (BOOLEAN)
-- source_count (INT32), reconciliation_confidence (DOUBLE), last_pipeline_run (VARCHAR)`;
+- source_count (INT32), reconciliation_confidence (DOUBLE), provenance_last_run (VARCHAR)
+- provenance_sources (VARCHAR), provenance_timestamps (VARCHAR)`;
 
 // ---------------------------------------------------------------------------
 // Model provider
