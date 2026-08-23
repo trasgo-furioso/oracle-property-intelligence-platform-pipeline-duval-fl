@@ -187,6 +187,9 @@ function loadPreFetchedFdotData(): RawRecord[] | null {
       fdotByParcelId = loadFdotSupplement();
     }
 
+    // Also try loading year-built.json supplement (from PAO bulk or estimation)
+    const yearBuiltMap = loadYearBuiltSupplement();
+
     // Convert to RawRecord format expected by fdot-transform
     // Use parcel_id field, falling back to re field (COJ uses 're' as parcel ID)
     return raw.map((r) => {
@@ -218,6 +221,15 @@ function loadPreFetchedFdotData(): RawRecord[] | null {
           if (merged.dor_use_code === undefined || merged.dor_use_code === null) {
             merged.dor_use_code = fdot.dor_use_code ?? null;
           }
+        }
+      }
+
+      // Merge year-built supplement (from PAO bulk or estimation)
+      if (yearBuiltMap && (merged.year_built === undefined || merged.year_built === null)) {
+        const normalizedId = parcelId.replace(/\s+/g, '');
+        const yb = yearBuiltMap.get(normalizedId) ?? yearBuiltMap.get(parcelId);
+        if (yb !== undefined) {
+          merged.year_built = yb;
         }
       }
 
@@ -261,6 +273,36 @@ function loadFdotSupplement(): Map<string, Record<string, unknown>> | null {
   }
 
   console.info(`  [real-data] No FDOT supplement data found (year_built will be missing for COJ-only parcels)`);
+  return null;
+}
+
+/**
+ * Load year-built supplement data from year-built.json.
+ * Produced by fetch-year-built.ts (FDOT, PAO bulk, or estimation).
+ */
+function loadYearBuiltSupplement(): Map<string, number> | null {
+  const base = resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'data', 'real');
+  const candidates = [
+    resolve(base, 'year-built.json'),
+    '/app/data/real/year-built.json',
+  ];
+
+  for (const p of candidates) {
+    if (!existsSync(p)) continue;
+    try {
+      const raw = JSON.parse(readFileSync(p, 'utf-8')) as Array<{ parcel_id: string; year_built: number }>;
+      const map = new Map<string, number>();
+      for (const r of raw) {
+        const id = String(r.parcel_id ?? '').replace(/\s+/g, '');
+        if (id && r.year_built) map.set(id, r.year_built);
+      }
+      console.info(`  [real-data] Loaded ${map.size} year-built supplement records from ${p}`);
+      return map;
+    } catch {
+      continue;
+    }
+  }
+
   return null;
 }
 
