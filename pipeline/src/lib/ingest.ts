@@ -4,7 +4,8 @@
  */
 
 import { createHash, createHmac, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getPool, runMigrations } from './db.js';
@@ -55,6 +56,28 @@ import type {
   Provenance,
   DerivedSignals,
 } from './types.js';
+
+// ---------------------------------------------------------------------------
+// Streaming JSON array loader — avoids V8 string length limit on large files
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a JSON file containing an array of objects without loading the entire
+ * file into a single string.  The file format is assumed to be:
+ *   [\n  {...},\n  {...},\n  ...\n]
+ * Each object occupies one line (written by writeJsonArrayStreaming in fetch-real-data.ts).
+ */
+async function loadLargeJsonArray<T = Record<string, unknown>>(path: string): Promise<T[]> {
+  const results: T[] = [];
+  const rl = createInterface({ input: createReadStream(path, { encoding: 'utf-8' }), crlfDelay: Infinity });
+  for await (const line of rl) {
+    const trimmed = line.trim();
+    if (trimmed === '[' || trimmed === ']' || trimmed === '') continue;
+    const clean = trimmed.endsWith(',') ? trimmed.slice(0, -1) : trimmed;
+    if (clean) results.push(JSON.parse(clean) as T);
+  }
+  return results;
+}
 
 // ---------------------------------------------------------------------------
 // Content hashing
@@ -170,7 +193,7 @@ function useRealData(): boolean {
  * When COJ is the primary source, also tries to load FDOT data and merge
  * supplementary fields (year_built, total_living_area, etc.) by parcel_id.
  */
-function loadPreFetchedFdotData(): RawRecord[] | null {
+async function loadPreFetchedFdotData(): Promise<RawRecord[] | null> {
   const realDataPath = resolveRealDataPath();
   if (!realDataPath) return null;
 
@@ -178,17 +201,17 @@ function loadPreFetchedFdotData(): RawRecord[] | null {
   const sourceId = isCoj ? 'coj-duval-parcels' : 'fdot-duval-parcels';
 
   try {
-    const raw = JSON.parse(readFileSync(realDataPath, 'utf-8')) as Array<Record<string, unknown>>;
+    const raw = await loadLargeJsonArray<Record<string, unknown>>(realDataPath);
     console.info(`  Loaded ${raw.length} pre-fetched parcels from ${realDataPath}`);
 
     // If COJ is primary, try to supplement with FDOT data for year_built, sqft, etc.
     let fdotByParcelId: Map<string, Record<string, unknown>> | null = null;
     if (isCoj) {
-      fdotByParcelId = loadFdotSupplement();
+      fdotByParcelId = await loadFdotSupplement();
     }
 
     // Also try loading year-built.json supplement (from PAO bulk or estimation)
-    const yearBuiltMap = loadYearBuiltSupplement();
+    const yearBuiltMap = await loadYearBuiltSupplement();
 
     // Convert to RawRecord format expected by fdot-transform
     // Use parcel_id field, falling back to re field (COJ uses 're' as parcel ID)
@@ -249,7 +272,7 @@ function loadPreFetchedFdotData(): RawRecord[] | null {
  * Load FDOT supplementary data indexed by parcel_id.
  * Used to enrich COJ records with fields COJ doesn't provide (year_built, sqft, etc.).
  */
-function loadFdotSupplement(): Map<string, Record<string, unknown>> | null {
+async function loadFdotSupplement(): Promise<Map<string, Record<string, unknown>> | null> {
   const base = resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'data', 'real');
   const candidates = [
     resolve(base, 'fdot-parcels.json'),
@@ -259,7 +282,7 @@ function loadFdotSupplement(): Map<string, Record<string, unknown>> | null {
   for (const p of candidates) {
     if (!existsSync(p)) continue;
     try {
-      const raw = JSON.parse(readFileSync(p, 'utf-8')) as Array<Record<string, unknown>>;
+      const raw = await loadLargeJsonArray<Record<string, unknown>>(p);
       const map = new Map<string, Record<string, unknown>>();
       for (const r of raw) {
         const id = String(r.parcel_id ?? '').replace(/\s+/g, '');
@@ -280,7 +303,7 @@ function loadFdotSupplement(): Map<string, Record<string, unknown>> | null {
  * Load year-built supplement data from year-built.json.
  * Produced by fetch-year-built.ts (FDOT, PAO bulk, or estimation).
  */
-function loadYearBuiltSupplement(): Map<string, number> | null {
+async function loadYearBuiltSupplement(): Promise<Map<string, number> | null> {
   const base = resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'data', 'real');
   const candidates = [
     resolve(base, 'year-built.json'),
@@ -290,7 +313,7 @@ function loadYearBuiltSupplement(): Map<string, number> | null {
   for (const p of candidates) {
     if (!existsSync(p)) continue;
     try {
-      const raw = JSON.parse(readFileSync(p, 'utf-8')) as Array<{ parcel_id: string; year_built: number }>;
+      const raw = await loadLargeJsonArray<{ parcel_id: string; year_built: number }>(p);
       const map = new Map<string, number>();
       for (const r of raw) {
         const id = String(r.parcel_id ?? '').replace(/\s+/g, '');
@@ -512,7 +535,7 @@ export async function runIngestion(options: IngestionOptions): Promise<void> {
 
   if (realData) {
     // REAL DATA MODE: Try pre-fetched files first, then live FDOT API
-    const preFetched = loadPreFetchedFdotData();
+    const preFetched = await loadPreFetchedFdotData();
     if (preFetched && preFetched.length > 0) {
       realFdotRecords = preFetched.slice(0, targetCount);
       parcelIds = realFdotRecords.map((r) => r.parcel_id);
