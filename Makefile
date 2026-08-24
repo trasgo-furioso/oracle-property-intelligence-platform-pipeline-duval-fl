@@ -11,7 +11,7 @@ IPNS_KEY        := k51qzi5uqu5dggq0h9xylfc0kr0kpw7i4zcacnfrymz9sjv7mpeze4femaujc
 CRM_WEBHOOK     := https://42trwtmqqe.execute-api.us-east-2.amazonaws.com/webhook/pipeline
 FILEBASE_BUCKET := elephant-oracle-duval
 EC2_APP_DIR     := /opt/app
-TRIGGER_LIMIT   := 200
+TRIGGER_LIMIT   := 400000
 
 # --- Helpers ---
 define ssm_run

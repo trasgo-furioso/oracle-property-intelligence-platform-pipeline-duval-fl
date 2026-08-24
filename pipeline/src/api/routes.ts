@@ -379,7 +379,7 @@ export function createApiRoutes(): Hono {
     try {
       const body = await c.req.json().catch(() => ({}));
       const county = (body as { county?: string }).county ?? 'duval';
-      const limit = (body as { limit?: number }).limit ?? 200;
+      const limit = (body as { limit?: number }).limit ?? 400000;
 
       // Create a new pipeline run record
       const runId = crypto.randomUUID();

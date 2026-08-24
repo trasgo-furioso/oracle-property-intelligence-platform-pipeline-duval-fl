@@ -398,7 +398,7 @@ async function fetchTransitStops(): Promise<{
 async function main() {
   const args = process.argv.slice(2);
   const limitArg = args.find((a) => a.startsWith('--limit='));
-  const limit = limitArg ? parseInt(limitArg.split('=')[1]!, 10) : 2000;
+  const limit = limitArg ? parseInt(limitArg.split('=')[1]!, 10) : 400000;
 
   console.info('='.repeat(70));
   console.info('  ORACLE PIPELINE — Real Duval County Data Fetcher');
