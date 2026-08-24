@@ -147,12 +147,22 @@ export function generateMockAppraiserRecord(parcelId: string): RawRecord {
   const sqft = 1000 + Math.floor(Math.random() * 3000);
   const assessedValue = 100000 + Math.floor(Math.random() * 500000);
 
+  // Use realistic Jacksonville street names instead of generic "Main St"
+  const STREETS = [
+    'Atlantic Blvd', 'Beach Blvd', 'University Blvd', 'San Jose Blvd',
+    'Baymeadows Rd', 'Hendricks Ave', 'Riverside Ave', 'Park St',
+    'Philips Hwy', 'Blanding Blvd', 'Normandy Blvd', 'Edgewood Ave',
+    'King St', 'Duval St', 'Ocean St', 'Herschel St',
+    'Post St', 'Margaret St', 'Forbes St', 'Stockton St',
+  ];
+  const street = STREETS[Math.floor(Math.random() * STREETS.length)];
+
   return {
     parcel_id: parcelId,
     source_id: SOURCE_ID,
     raw_data: {
       owner: `Owner-${parcelId}`,
-      address: `${Math.floor(Math.random() * 9999)} Main St, Jacksonville, FL`,
+      address: `${Math.floor(Math.random() * 9999)} ${street}, Jacksonville, FL`,
       assessed_value: assessedValue,
       market_value: Math.round(assessedValue * 1.15),
       year_built: yearBuilt,

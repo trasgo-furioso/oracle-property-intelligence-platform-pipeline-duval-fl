@@ -143,15 +143,21 @@ function estimateYearBuiltFromCoj(cojDataPath: string): YearBuiltRecord[] {
       }
     }
 
-    // Estimate from sale year: if sold before 2010, roof is likely 15+ years old
-    // This is a heuristic, not actual year_built
+    // Estimate from sale year: properties are typically built before or around first sale.
+    // This is a heuristic estimate, not an authoritative year_built.
     const saleYear = p.saleslyy;
     const useCode = String(p.puse || '');
+    const useCodeNum = parseInt(useCode, 10);
 
-    // Residential properties (use codes 01xx) typically built around or before first sale
-    if (saleYear && saleYear > 1900 && saleYear <= currentYear && useCode.startsWith('01')) {
-      // Estimate: built ~5 years before first recorded sale, capped
-      const estimatedYearBuilt = Math.max(1950, saleYear - Math.floor(Math.random() * 10 + 2));
+    // Apply to residential (01xx), commercial (10xx-39xx), and other improved properties
+    // that have a valid sale year. Exclude vacant land (00xx) and government/exempt (8x-9x).
+    const isImprovedProperty = !isNaN(useCodeNum) && useCodeNum >= 1 && useCodeNum < 80;
+
+    if (saleYear && saleYear > 1900 && saleYear <= currentYear && (isImprovedProperty || useCode === '')) {
+      // Deterministic estimate: built ~5 years before recorded sale, capped at 1950
+      // Use parcel_id hash for deterministic offset (0-9 years) instead of Math.random()
+      const hashOffset = String(parcelId).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 10;
+      const estimatedYearBuilt = Math.max(1950, saleYear - (hashOffset + 2));
       if (estimatedYearBuilt > 1800 && estimatedYearBuilt <= currentYear) {
         records.push({ parcel_id: String(parcelId), year_built: estimatedYearBuilt, source: 'coj-estimated' });
       }

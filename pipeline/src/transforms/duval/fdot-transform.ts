@@ -91,16 +91,29 @@ export function transformFdotRecords(records: RawRecord[]): TransformResult[] {
       const d = record.raw_data;
 
       // --- Address ---
-      // COJ fields: longname, stnm_type, addrcity, zipcode
+      // COJ fields (lowercased from ArcGIS): longname (full street address), stnm_type (street type suffix e.g. "ST"),
+      //   addrcity, zipcode, stno (street number), stname (street name)
       // FDOT fields: address_street, address_city, address_state, address_zip
-      const streetAddr = (d.longname ?? d.address_street) as string | null;
-      const streetName = d.stnm_type as string | null;
+      //
+      // COJ "longname" is the full situs address (e.g. "3128 ATLANTIC BLVD").
+      // COJ "stnm_type" is only the suffix (e.g. "ST", "AVE") — NOT a full street name.
+      // FDOT "address_street" (APTS_STRT) is the full situs street address.
+      const cojStreet = d.longname as string | null;
+      const fdotStreet = d.address_street as string | null;
+      // Build full street from COJ components if longname is missing
+      const cojStNo = d.stno as string | number | null;
+      const cojStName = d.stname as string | null;
+      const cojStType = d.stnm_type as string | null;
+      const cojComposed = (cojStNo && cojStName)
+        ? [String(cojStNo), cojStName, cojStType].filter(Boolean).join(' ')
+        : null;
+      const streetAddr = cojStreet ?? cojComposed ?? fdotStreet;
       const city = (d.addrcity as string) || (d.address_city as string) || 'JACKSONVILLE';
       const zip = (d.zipcode ?? d.address_zip) != null ? String(d.zipcode ?? d.address_zip) : undefined;
 
       const address: Address = {
         full: streetAddr ?? undefined,
-        street: streetName ?? streetAddr ?? undefined,
+        street: streetAddr ?? undefined,
         city,
         state: 'FL',
         zip,
@@ -110,7 +123,7 @@ export function transformFdotRecords(records: RawRecord[]): TransformResult[] {
       // COJ fields: lnameowner, mailaddr1, mailcity, mailstate, mailzip
       // FDOT fields: owner_name, owner_address, owner_city, owner_state, owner_zip
       const ownerName = (d.lnameowner ?? d.owner_name) as string | null;
-      const mailAddr1 = (d.mailaddr1 ?? d.owner_address) as string | null;
+      const mailAddr1 = (d.mailaddr1 ?? d.owner_address ?? d.owner_addr1) as string | null;
       const mailCity = (d.mailcity ?? d.owner_city) as string | null;
       const mailState = (d.mailstate ?? d.owner_state) as string | null;
       const mailZip = (d.mailzip ?? d.owner_zip) != null ? String(d.mailzip ?? d.owner_zip) : undefined;
