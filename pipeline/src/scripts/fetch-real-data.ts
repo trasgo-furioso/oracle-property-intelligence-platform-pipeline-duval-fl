@@ -20,7 +20,7 @@
  *   pipeline/data/seeds/duval-real.csv
  */
 
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, createWriteStream } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -418,19 +418,57 @@ async function main() {
   const transit = await fetchTransitStops();
 
   // ---------- Save results ----------
+  // Stream JSON arrays and CSV files to disk one record at a time to avoid
+  // the ~512 MB string-length limit of JSON.stringify on 374k+ records.
 
   console.info('\n--- Saving results ---');
 
+  /**
+   * Stream an array of objects to a file as a valid JSON array.
+   * Each record is serialized individually to avoid hitting the ~512 MB
+   * string-length limit of a single JSON.stringify() call on 374k+ records.
+   */
+  function writeJsonArrayStreaming(filePath: string, records: Record<string, unknown>[]): Promise<void> {
+    return new Promise((resolvePromise, reject) => {
+      const ws = createWriteStream(filePath, { encoding: 'utf-8' });
+      ws.on('error', reject);
+      ws.write('[\n');
+      for (let i = 0; i < records.length; i++) {
+        const line = JSON.stringify(records[i]!);
+        ws.write(i < records.length - 1 ? line + ',\n' : line + '\n');
+      }
+      ws.end(']\n', () => resolvePromise());
+    });
+  }
+
+  /** Stream seed CSV rows to a file. */
+  function writeSeedCsv(filePath: string, records: Record<string, unknown>[]): Promise<void> {
+    return new Promise((resolvePromise, reject) => {
+      const ws = createWriteStream(filePath, { encoding: 'utf-8' });
+      ws.on('error', reject);
+      ws.write('parcel_id,address_street,address_city,address_state,address_zip\n');
+      for (const r of records) {
+        const street = String(r.address_street ?? '').replace(/"/g, '""');
+        const city = String(r.address_city ?? '').replace(/"/g, '""');
+        const state = String(r.address_state ?? 'FL');
+        const zip = String(r.address_zip ?? '');
+        ws.write(`${r.parcel_id},"${street}","${city}","${state}","${zip}"\n`);
+      }
+      ws.end(() => resolvePromise());
+    });
+  }
+
   if (fdot.records.length > 0) {
-    writeFileSync(resolve(REAL_DIR, 'fdot-parcels.json'), JSON.stringify(fdot.records, null, 2));
+    await writeJsonArrayStreaming(resolve(REAL_DIR, 'fdot-parcels.json'), fdot.records);
     console.info(`  Saved fdot-parcels.json (${fdot.records.length} records)`);
   }
 
   if (coj.records.length > 0) {
-    writeFileSync(resolve(REAL_DIR, 'coj-parcels.json'), JSON.stringify(coj.records, null, 2));
+    await writeJsonArrayStreaming(resolve(REAL_DIR, 'coj-parcels.json'), coj.records);
     console.info(`  Saved coj-parcels.json (${coj.records.length} records)`);
   }
 
+  // Starbucks and transit are small — keep as regular JSON
   if (starbucks.locations.length > 0) {
     writeFileSync(resolve(REAL_DIR, 'starbucks.json'), JSON.stringify(starbucks.locations, null, 2));
     console.info(`  Saved starbucks.json (${starbucks.locations.length} locations)`);
@@ -445,23 +483,13 @@ async function main() {
 
   const seedRecords = fdot.records.length > 0 ? fdot.records : coj.records;
   if (seedRecords.length > 0) {
-    const header = 'parcel_id,address_street,address_city,address_state,address_zip';
-    const rows = seedRecords.map((r) => {
-      const street = String(r.address_street ?? '').replace(/"/g, '""');
-      const city = String(r.address_city ?? '').replace(/"/g, '""');
-      const state = String(r.address_state ?? 'FL');
-      const zip = String(r.address_zip ?? '');
-      return `${r.parcel_id},"${street}","${city}","${state}","${zip}"`;
-    });
-
-    const csv = [header, ...rows].join('\n') + '\n';
     const seedPath = resolve(SEEDS_DIR, 'duval-real.csv');
-    writeFileSync(seedPath, csv);
+    await writeSeedCsv(seedPath, seedRecords);
     console.info(`  Saved duval-real.csv (${seedRecords.length} parcels)`);
 
     // Also overwrite duval.csv so the pipeline uses real data
     const mainSeedPath = resolve(SEEDS_DIR, 'duval.csv');
-    writeFileSync(mainSeedPath, csv);
+    await writeSeedCsv(mainSeedPath, seedRecords);
     console.info(`  Updated duval.csv with real parcel IDs`);
   }
 
