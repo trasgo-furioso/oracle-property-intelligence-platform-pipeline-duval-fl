@@ -7,7 +7,10 @@ import { queryRoutes } from './api/query-routes.js';
 import { agentRoutes } from './api/agent-routes.js';
 
 // Start Restate SDK endpoint (binds workflows on port 9081)
-import './services/index.js';
+import { endpoint as restateEndpoint } from './services/index.js';
+
+// Force tsc to keep the import by referencing it
+console.info(`[restate] Endpoint loaded: ${typeof restateEndpoint}`);
 
 const app = new Hono();
 
