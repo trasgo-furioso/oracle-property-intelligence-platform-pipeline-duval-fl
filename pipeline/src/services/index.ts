@@ -33,7 +33,7 @@ endpoint.bind(publishWorkflow);
 endpoint.bind(publishQueryTableWorkflow);
 
 // Start the Restate HTTP server
-const RESTATE_PORT = parseInt(process.env.RESTATE_SERVICE_PORT ?? '9080', 10);
+const RESTATE_PORT = parseInt(process.env.RESTATE_SERVICE_PORT ?? '9081', 10);
 
 endpoint.listen(RESTATE_PORT);
 console.info(`[restate] Pipeline services listening on port ${RESTATE_PORT}`);

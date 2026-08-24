@@ -45,6 +45,7 @@ services:
     container_name: oracle-pipeline
     ports:
       - '9080:9080'
+      - '9081:9081'
     environment:
       DATABASE_URL: postgresql://oracle:${POSTGRES_PASSWORD:-oracle_dev_password}@postgres:5432/oracle_pipeline
       RESTATE_RUNTIME_ENDPOINT: http://restate:8080

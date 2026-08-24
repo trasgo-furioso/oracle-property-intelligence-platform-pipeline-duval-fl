@@ -80,6 +80,153 @@ async function loadLargeJsonArray<T = Record<string, unknown>>(path: string): Pr
 }
 
 // ---------------------------------------------------------------------------
+// Live COJ ArcGIS fetcher — fetches directly from maps.coj.net during run
+// ---------------------------------------------------------------------------
+
+interface CojArcGISFeature {
+  attributes: Record<string, unknown>;
+  geometry?: {
+    rings?: number[][][];
+    x?: number;
+    y?: number;
+  };
+}
+
+interface CojArcGISResponse {
+  features?: CojArcGISFeature[];
+  exceededTransferLimit?: boolean;
+  error?: { code: number; message: string };
+}
+
+const COJ_ARCGIS_QUERY_URL = 'https://maps.coj.net/coj/rest/services/CityBiz/Parcels/MapServer/0/query';
+const COJ_PAGE_SIZE = 1000;
+const COJ_REQUEST_DELAY_MS = 300;
+const COJ_MAX_RETRIES = 3;
+const COJ_TIMEOUT_MS = 60_000;
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Compute centroid from polygon rings (WGS84).
+ */
+function computeCentroid(rings: number[][][]): { lat: number; lng: number } | null {
+  if (!rings?.[0]?.length) return null;
+  const outer = rings[0];
+  let sx = 0, sy = 0, n = 0;
+  for (const pt of outer) {
+    if (pt && pt.length >= 2) { sx += pt[0]!; sy += pt[1]!; n++; }
+  }
+  if (n === 0) return null;
+  return { lng: sx / n, lat: sy / n };
+}
+
+/**
+ * Fetch COJ parcels directly from the ArcGIS REST API with pagination.
+ * Uses resultOffset + resultRecordCount with exceededTransferLimit loop.
+ * The `limit` parameter controls how many total records to fetch.
+ *
+ * Returns RawRecord[] in the same format as loadPreFetchedFdotData(),
+ * so the downstream transform (fdot-transform) works identically.
+ */
+async function fetchCojParcelsLive(limit: number): Promise<RawRecord[]> {
+  const allRecords: RawRecord[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  console.info(`  [live-fetch] Fetching up to ${limit} parcels from COJ ArcGIS...`);
+
+  while (hasMore && allRecords.length < limit) {
+    const batchSize = Math.min(limit - allRecords.length, COJ_PAGE_SIZE);
+    const params = new URLSearchParams({
+      where: '1=1',
+      outFields: '*',
+      returnGeometry: 'true',
+      f: 'json',
+      resultOffset: String(offset),
+      resultRecordCount: String(batchSize),
+      outSR: '4326',
+    });
+
+    const url = `${COJ_ARCGIS_QUERY_URL}?${params}`;
+    let data: CojArcGISResponse | null = null;
+
+    for (let attempt = 1; attempt <= COJ_MAX_RETRIES; attempt++) {
+      try {
+        const resp = await fetch(url, { signal: AbortSignal.timeout(COJ_TIMEOUT_MS) });
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+        }
+        data = (await resp.json()) as CojArcGISResponse;
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`  [live-fetch] Attempt ${attempt}/${COJ_MAX_RETRIES} failed: ${msg}`);
+        if (attempt < COJ_MAX_RETRIES) {
+          await sleepMs(COJ_REQUEST_DELAY_MS * attempt);
+        }
+      }
+    }
+
+    if (!data) {
+      throw new Error('COJ ArcGIS: all retry attempts exhausted');
+    }
+
+    if (data.error) {
+      throw new Error(`COJ ArcGIS API error: ${data.error.message} (code ${data.error.code})`);
+    }
+
+    const features = data.features ?? [];
+    if (features.length === 0) {
+      hasMore = false;
+      break;
+    }
+
+    for (const f of features) {
+      if (allRecords.length >= limit) break;
+      const a = f.attributes;
+      const reNo = String(a.RE_NO ?? a.PARCEL_ID ?? a.RE ?? '').trim();
+      if (!reNo) continue;
+
+      const centroid = f.geometry?.rings
+        ? computeCentroid(f.geometry.rings)
+        : f.geometry?.x != null
+          ? { lng: f.geometry.x, lat: f.geometry.y ?? 0 }
+          : null;
+
+      // Build raw_data in the same shape that fdot-transform.ts expects:
+      // lowercase COJ field names + lat/lng from centroid
+      const rawData: Record<string, unknown> = {
+        ...Object.fromEntries(
+          Object.entries(a).map(([k, v]) => [k.toLowerCase(), v]),
+        ),
+        parcel_id: reNo,
+        source: 'coj',
+        lat: centroid?.lat ?? null,
+        lng: centroid?.lng ?? null,
+      };
+
+      allRecords.push({
+        parcel_id: reNo,
+        source_id: 'coj-duval-parcels',
+        raw_data: rawData,
+      });
+    }
+
+    offset += features.length;
+    hasMore = data.exceededTransferLimit === true && allRecords.length < limit;
+
+    console.info(`  [live-fetch] COJ: fetched ${allRecords.length} / ${limit} records...`);
+
+    if (hasMore) await sleepMs(COJ_REQUEST_DELAY_MS);
+  }
+
+  console.info(`  [live-fetch] COJ fetch complete: ${allRecords.length} parcels`);
+  return allRecords;
+}
+
+// ---------------------------------------------------------------------------
 // Content hashing
 // ---------------------------------------------------------------------------
 
@@ -172,7 +319,8 @@ function resolveRealDataPath(): string | null {
 
 /**
  * Check if real-data mode is enabled via USE_REAL_DATA env var.
- * Also auto-enables if pre-fetched real data files exist and PIPELINE_USE_MOCK is not set.
+ * Auto-enables unless PIPELINE_USE_MOCK is set — the pipeline can now
+ * fetch directly from COJ ArcGIS, so pre-fetched files are not required.
  */
 function useRealData(): boolean {
   if (process.env.PIPELINE_USE_MOCK === '1' || process.env.PIPELINE_USE_MOCK === 'true') {
@@ -181,8 +329,11 @@ function useRealData(): boolean {
   if (process.env.USE_REAL_DATA === '1' || process.env.USE_REAL_DATA === 'true') {
     return true;
   }
-  // Auto-detect: if real data files exist, use them
-  return resolveRealDataPath() !== null;
+  // Auto-detect: if real data files exist, use them (backward compat).
+  // Also returns true by default since live fetch is now available.
+  if (resolveRealDataPath() !== null) return true;
+  // Default to real data — live fetch from COJ ArcGIS is the primary path
+  return true;
 }
 
 /**
@@ -534,20 +685,55 @@ export async function runIngestion(options: IngestionOptions): Promise<void> {
   const targetCount = limit ?? 200;
 
   if (realData) {
-    // REAL DATA MODE: Try pre-fetched files first, then live FDOT API
-    const preFetched = await loadPreFetchedFdotData();
-    if (preFetched && preFetched.length > 0) {
-      realFdotRecords = preFetched.slice(0, targetCount);
-      parcelIds = realFdotRecords.map((r) => r.parcel_id);
-      console.info(`  Using ${parcelIds.length} pre-fetched REAL parcels from data/real/`);
-    } else {
-      console.info(`  Fetching ${targetCount} real parcels from FDOT statewide parcel service (fallback)...`);
-      realFdotRecords = await fetchDuvalParcels(targetCount);
-      // Re-tag with coj source_id for consistency with the transform
-      realFdotRecords = realFdotRecords.map((r) => ({ ...r, source_id: 'coj-duval-parcels' }));
-      parcelIds = realFdotRecords.map((r) => r.parcel_id);
-      console.info(`  Fetched ${parcelIds.length} REAL parcel IDs (FDOT fallback)`);
+    // REAL DATA MODE: Try live COJ ArcGIS fetch first, then pre-fetched file, then FDOT API
+    let fetchMode = 'none';
+
+    // 1. Live fetch from COJ ArcGIS (primary — runs on EC2 with US IP)
+    try {
+      console.info(`  [1] Trying live fetch from COJ ArcGIS (${targetCount} parcels)...`);
+      realFdotRecords = await fetchCojParcelsLive(targetCount);
+      if (realFdotRecords.length > 0) {
+        fetchMode = 'live-coj';
+        // Enrich with year-built supplement if available
+        const yearBuiltMap = await loadYearBuiltSupplement();
+        if (yearBuiltMap) {
+          for (const rec of realFdotRecords) {
+            const rd = rec.raw_data;
+            if (rd.year_built === undefined || rd.year_built === null) {
+              const normalizedId = rec.parcel_id.replace(/\s+/g, '');
+              const yb = yearBuiltMap.get(normalizedId) ?? yearBuiltMap.get(rec.parcel_id);
+              if (yb !== undefined) {
+                rd.year_built = yb;
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`  [1] Live COJ fetch failed: ${msg}`);
     }
+
+    // 2. Fall back to pre-fetched file (coj-parcels.json / fdot-parcels.json)
+    if (!realFdotRecords || realFdotRecords.length === 0) {
+      console.info(`  [2] Trying pre-fetched file fallback...`);
+      const preFetched = await loadPreFetchedFdotData();
+      if (preFetched && preFetched.length > 0) {
+        realFdotRecords = preFetched.slice(0, targetCount);
+        fetchMode = 'file';
+      }
+    }
+
+    // 3. Fall back to FDOT statewide service (last resort)
+    if (!realFdotRecords || realFdotRecords.length === 0) {
+      console.info(`  [3] Trying FDOT statewide service fallback...`);
+      realFdotRecords = await fetchDuvalParcels(targetCount);
+      realFdotRecords = realFdotRecords.map((r) => ({ ...r, source_id: 'coj-duval-parcels' }));
+      fetchMode = 'fdot-fallback';
+    }
+
+    parcelIds = realFdotRecords.map((r) => r.parcel_id);
+    console.info(`  Using ${parcelIds.length} REAL parcels (mode: ${fetchMode})`);
   } else {
     // MOCK MODE: Get from DB or generate fabricated IDs
     const result = await pool.query<{ parcel_id: string }>(

@@ -6,6 +6,9 @@ import { createApiRoutes } from './api/routes.js';
 import { queryRoutes } from './api/query-routes.js';
 import { agentRoutes } from './api/agent-routes.js';
 
+// Start Restate SDK endpoint (binds workflows on port 9081)
+import './services/index.js';
+
 const app = new Hono();
 
 // Middleware
@@ -40,5 +43,46 @@ serve({
   fetch: app.fetch,
   port,
 });
+
+// ---------------------------------------------------------------------------
+// Auto-register Restate deployment after server startup
+// ---------------------------------------------------------------------------
+const RESTATE_ADMIN = process.env.RESTATE_ADMIN_ENDPOINT ?? 'http://restate:9070';
+const RESTATE_SERVICE_PORT = process.env.RESTATE_SERVICE_PORT ?? '9081';
+const DEPLOYMENT_URI = `http://pipeline:${RESTATE_SERVICE_PORT}`;
+
+async function registerWithRestate(retries = 3, delayMs = 5000): Promise<void> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(`${RESTATE_ADMIN}/deployments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uri: DEPLOYMENT_URI }),
+      });
+      if (res.ok || res.status === 409) {
+        // 409 = already registered, which is fine
+        console.info(
+          `[restate] Registered with Restate at ${DEPLOYMENT_URI} (status ${res.status})`,
+        );
+        return;
+      }
+      const body = await res.text().catch(() => '');
+      console.warn(
+        `[restate] Registration attempt ${attempt}/${retries} failed: ${res.status} ${body}`,
+      );
+    } catch (err) {
+      console.warn(
+        `[restate] Registration attempt ${attempt}/${retries} error: ${(err as Error).message}`,
+      );
+    }
+    if (attempt < retries) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  console.error('[restate] Failed to register with Restate after all retries — workflows will not be available');
+}
+
+// Wait a couple seconds for the Restate endpoint to be ready, then register
+setTimeout(() => void registerWithRestate(), 2000);
 
 export default app;
