@@ -103,9 +103,7 @@ docker-restart: ## Restart pipeline container
 
 .PHONY: deploy
 deploy: ec2-pull ec2-build ec2-restart ## Full deploy: pull, build, restart on EC2
-	@echo "--- Deploy complete. Triggering pipeline run ---"
-	@sleep 5
-	$(MAKE) trigger-run
+	@echo "--- Deploy complete ---"
 
 .PHONY: ec2-ssh
 ec2-ssh: ## Open interactive SSM session to EC2
