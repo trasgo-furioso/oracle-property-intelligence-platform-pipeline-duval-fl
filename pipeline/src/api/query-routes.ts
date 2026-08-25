@@ -244,6 +244,148 @@ queryRoutes.get('/api/properties/search/types', (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Shared column list for CRM endpoints
+// ---------------------------------------------------------------------------
+
+const CRM_COLUMNS = `
+  parcel_id, full_address, assessed_value, market_value, current_owner_name,
+  lat, lng, year_built, sqft, roof_age_years, ownership_tenure_years,
+  is_regional_owner, water_proximity_ft, transit_distance_mi,
+  provenance_sources, provenance_last_run
+`.trim();
+
+/** Parse a numeric query param; returns NaN on missing/invalid. */
+function parseNum(raw: string | undefined): number {
+  if (raw === undefined) return NaN;
+  return parseFloat(raw);
+}
+
+/** Clamp limit to [1, 2000], default 1000. */
+function parseLimit(raw: string | undefined): number {
+  const n = parseInt(raw ?? '1000', 10);
+  if (isNaN(n)) return 1000;
+  return Math.min(2000, Math.max(1, n));
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/properties/viewport — bounding-box query for CRM map tiles
+// ---------------------------------------------------------------------------
+
+queryRoutes.get('/api/properties/viewport', async (c) => {
+  const latMin = parseNum(c.req.query('lat_min'));
+  const latMax = parseNum(c.req.query('lat_max'));
+  const lngMin = parseNum(c.req.query('lng_min'));
+  const lngMax = parseNum(c.req.query('lng_max'));
+
+  if ([latMin, latMax, lngMin, lngMax].some((v) => isNaN(v))) {
+    return c.json(
+      { error: 'lat_min, lat_max, lng_min, lng_max are all required and must be numbers' },
+      400,
+    );
+  }
+
+  const limit = parseLimit(c.req.query('limit'));
+
+  try {
+    await ensureDuckDb();
+
+    const rows = await queryAll<Record<string, unknown>>(
+      `SELECT ${CRM_COLUMNS}
+       FROM ${VIEW_NAME}
+       WHERE lat BETWEEN ${latMin} AND ${latMax}
+         AND lng BETWEEN ${lngMin} AND ${lngMax}
+         AND lat IS NOT NULL AND lng IS NOT NULL
+       LIMIT ${limit}`,
+    );
+
+    return c.json({ total: rows.length, limit, properties: rows });
+  } catch (err) {
+    console.error('[query-routes] viewport error:', err);
+    return c.json({ error: 'Viewport query failed', detail: String(err) }, 500);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/properties/filter — multi-criteria filter for CRM
+// ---------------------------------------------------------------------------
+
+queryRoutes.get('/api/properties/filter', async (c) => {
+  const conditions: string[] = [];
+  const criteria: Record<string, unknown> = {};
+
+  // Numeric filters
+  const numericFilters: Array<{ param: string; col: string; op: string }> = [
+    { param: 'roof_age_min', col: 'roof_age_years', op: '>=' },
+    { param: 'ownership_min', col: 'ownership_tenure_years', op: '>=' },
+    { param: 'value_min', col: 'assessed_value', op: '>=' },
+    { param: 'value_max', col: 'assessed_value', op: '<=' },
+  ];
+
+  for (const { param, col, op } of numericFilters) {
+    const val = parseNum(c.req.query(param));
+    if (!isNaN(val)) {
+      conditions.push(`${col} ${op} ${val}`);
+      criteria[param] = val;
+    }
+  }
+
+  // ZIP filter — sanitize to digits only, max 5 chars each
+  const zipRaw = c.req.query('zip');
+  if (zipRaw) {
+    const zips = zipRaw
+      .split(',')
+      .map((z) => z.replace(/\D/g, '').slice(0, 5))
+      .filter((z) => z.length > 0);
+    if (zips.length > 0) {
+      const inList = zips.map((z) => `'${z}'`).join(',');
+      conditions.push(`address_zip IN (${inList})`);
+      criteria['zip'] = zips;
+    }
+  }
+
+  // Boolean filters
+  if (c.req.query('regional_owner') === 'true') {
+    conditions.push('is_regional_owner = true');
+    criteria['regional_owner'] = true;
+  }
+  if (c.req.query('water_proximity') === 'true') {
+    conditions.push('is_waterfront = true');
+    criteria['water_proximity'] = true;
+  }
+
+  // Optional viewport bounds (combined viewport + criteria)
+  const latMin = parseNum(c.req.query('lat_min'));
+  const latMax = parseNum(c.req.query('lat_max'));
+  const lngMin = parseNum(c.req.query('lng_min'));
+  const lngMax = parseNum(c.req.query('lng_max'));
+  if ([latMin, latMax, lngMin, lngMax].every((v) => !isNaN(v))) {
+    conditions.push(`lat BETWEEN ${latMin} AND ${latMax}`);
+    conditions.push(`lng BETWEEN ${lngMin} AND ${lngMax}`);
+    conditions.push('lat IS NOT NULL AND lng IS NOT NULL');
+    criteria['viewport'] = { lat_min: latMin, lat_max: latMax, lng_min: lngMin, lng_max: lngMax };
+  }
+
+  const limit = parseLimit(c.req.query('limit'));
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  try {
+    await ensureDuckDb();
+
+    const rows = await queryAll<Record<string, unknown>>(
+      `SELECT ${CRM_COLUMNS}
+       FROM ${VIEW_NAME}
+       ${whereClause}
+       LIMIT ${limit}`,
+    );
+
+    return c.json({ total: rows.length, limit, criteria, properties: rows });
+  } catch (err) {
+    console.error('[query-routes] filter error:', err);
+    return c.json({ error: 'Filter query failed', detail: String(err) }, 500);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/properties/:parcel_id — single property detail (from Parquet)
 // ---------------------------------------------------------------------------
 
