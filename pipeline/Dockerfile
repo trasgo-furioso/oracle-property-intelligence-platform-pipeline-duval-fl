@@ -26,6 +26,7 @@ COPY data/ data/
 
 ENV NODE_ENV=production
 ENV PORT=9080
+ENV NODE_OPTIONS="--max-old-space-size=6144"
 
 EXPOSE 9080
 
