@@ -143,9 +143,9 @@ const sourceColumns = [
       const status = info.getValue();
       const variant =
         status === 'healthy'
-          ? 'default'
+          ? 'success'
           : status === 'slow'
-            ? 'secondary'
+            ? 'warning'
             : 'destructive';
       return <Badge variant={variant}>{status}</Badge>;
     },
@@ -272,7 +272,7 @@ function IpfsMcpSection() {
           <span className="text-muted-foreground">MCP Endpoint:</span>
           <div className="flex items-center gap-2">
             <code className="rounded bg-muted px-1.5 py-0.5 text-xs">/mcp</code>
-            <Badge variant="secondary">Configured</Badge>
+            <Badge variant="success">Configured</Badge>
           </div>
         </div>
       </CardContent>

@@ -39,10 +39,10 @@ import {
 // ---------------------------------------------------------------------------
 
 function StatusBadge({ status }: { status: PipelineRunStatus }) {
-  const variants: Record<PipelineRunStatus, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; label: string }> = {
-    success: { variant: 'default', label: 'Success' },
-    running: { variant: 'secondary', label: 'Running' },
-    partial: { variant: 'outline', label: 'Partial' },
+  const variants: Record<PipelineRunStatus, { variant: 'success' | 'info' | 'warning' | 'destructive' | 'outline'; label: string }> = {
+    success: { variant: 'success', label: 'Success' },
+    running: { variant: 'info', label: 'Running' },
+    partial: { variant: 'warning', label: 'Partial' },
     failed: { variant: 'destructive', label: 'Failed' },
   };
   const { variant, label } = variants[status] ?? { variant: 'outline' as const, label: status };
@@ -84,7 +84,7 @@ function ExpandedRunDetail({ runId }: { runId: string }) {
               const hasIssues = src.limitations && src.limitations.length > 0;
               return (
                 <div key={src.source_id} className="flex items-center gap-3 text-sm">
-                  <Badge variant={src.status === 'success' ? 'default' : 'outline'} className="w-20 justify-center text-xs">
+                  <Badge variant={src.status === 'success' ? 'success' : src.status === 'failed' ? 'destructive' : 'warning'} className="w-20 justify-center text-xs">
                     {src.status}
                   </Badge>
                   <span className="w-28 font-medium">{src.source_name}</span>
@@ -330,6 +330,7 @@ export default function PipelineRunsPage() {
         <Button
           onClick={() => triggerMutation.mutate('duval')}
           disabled={triggerMutation.isPending}
+          className="bg-blue-600 text-white hover:bg-blue-700"
         >
           <Play className="h-4 w-4" />
           {triggerMutation.isPending ? 'Triggering...' : 'Trigger Run'}

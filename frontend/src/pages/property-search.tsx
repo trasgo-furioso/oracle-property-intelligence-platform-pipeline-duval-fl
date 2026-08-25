@@ -186,7 +186,7 @@ export function PropertySearchPage() {
         {data && data.results.length > 0 && (
           <button
             onClick={() => exportCsv(data)}
-            className="inline-flex items-center gap-1 rounded-md bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground hover:bg-secondary/80"
+            className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             Export CSV
           </button>
@@ -257,7 +257,7 @@ export function PropertySearchPage() {
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1}
-            className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
           >
             Previous
           </button>
@@ -267,7 +267,7 @@ export function PropertySearchPage() {
           <button
             onClick={() => setPage((p) => Math.min(data.pages, p + 1))}
             disabled={page >= data.pages}
-            className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
           >
             Next
           </button>
