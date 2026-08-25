@@ -1,61 +1,45 @@
 # Oracle Pipeline — Development Log
 
-## Session 1 — 2026-07-15
+## Session 1 — July 15
 
-Upstream team created the repo with a bare README. No code yet.
+The upstream team created the repository with a bare README. No code, no structure — just a placeholder.
 
-## Session 2 — 2026-08-19
+## Session 2 — August 19
 
-Stakeholder spec landed as a README update, defining what the pipeline should do.
+The stakeholder spec landed, defining what the pipeline should do: ingest Duval County property records from public sources, enrich them with derived signals, publish to IPFS, and expose them through a search API and AI agent.
 
-## Session 3 — 2026-08-21
+## Session 3 — August 21 (morning)
 
-Bootstrapped the entire pipeline in one sitting — data adapters, workflow engine, dashboard, property search, agent chat, IPFS publishing. Filebase's free tier forced creative constraints: one bucket, one IPNS name, path prefixes for everything.
+Built the entire platform in one sitting. Infrastructure went up on AWS (EC2, CloudFront, Amplify), the pipeline engine got six data source adapters, a workflow orchestrator, IPFS publishing via Filebase, an MCP server for machine-to-machine access, an AI-powered chat agent, and a four-page React dashboard. Filebase's free tier only allows one bucket and one IPNS name, which shaped the publishing design from the start.
 
-## Session 4 — 2026-08-21
+## Session 4 — August 21 (afternoon)
 
-Got the deployed system talking end-to-end. CloudFront fronts the EC2 backend, the AI agent runs on the cheapest Haiku model, and ingestion actually publishes to IPFS.
+Got the deployed system working end-to-end. CloudFront now routes API traffic to the EC2 backend, the ingestion trigger actually runs and publishes data, and the cheapest available AI model powers the agent chat. Docker builds, environment wiring, and deployment plumbing all came together.
 
-## Session 5 — 2026-08-21
+## Session 5 — August 21 (evening)
 
-Added Playwright e2e tests covering all four pages and six query types. This became the regression harness for every session that followed.
+Added Playwright end-to-end tests covering all four pages and all six property query types. These became the regression safety net for every session that followed.
 
-## Session 6 — 2026-08-22
+## Session 6 — August 22 (early)
 
-Ripped out Postgres entirely and replaced it with DuckDB reading Parquet over IPFS. Property search and the AI agent now query published open data directly — no database in the loop. Added Powertools, PagerDuty, and CloudWatch.
+Removed the Postgres dependency for reads. Property search and the AI agent now query published Parquet files on IPFS directly through DuckDB — no database in the read path. Added production observability: structured logging, CloudWatch dashboards, PagerDuty alerting, and a CI pipeline.
 
-## Session 7 — 2026-08-22
+## Session 7 — August 22 (mid-day)
 
-Pivoted from mock data to real county records. The ArcGIS portal is geo-blocked from Brazil, forcing all data operations onto the US-based EC2. COJ field names bore no resemblance to our assumptions, requiring a full transform rewrite.
+Pivoted from mock data to real county records. The City of Jacksonville ArcGIS portal turned out to be geo-blocked from outside the US, so all data fetching had to run on the EC2 instance. The real field names bore no resemblance to the mock schema, requiring a full rewrite of the data transforms.
 
-## Session 8 — 2026-08-22
+## Session 8 — August 22 (afternoon)
 
-Scaled the real data ingestion — paginated ArcGIS fetches, merged FDOT supplement data by parcel ID. Fixed BigInt serialization in the agent's DuckDB queries.
+Scaled real data ingestion with paginated ArcGIS fetches and supplemental FDOT records merged by parcel ID. Fixed serialization issues in the agent's query layer and made all six search modes report honestly when properties lack the fields a query needs.
 
-## Session 9 — 2026-08-22
+## Session 9 — August 23
 
-Made all six search modes honest about data gaps, reporting when properties lack the fields a query needs.
+Solved the missing year-built problem using a three-tier estimation fallback. Formalized the CRM integration contract: downstream systems discover fresh data through a single IPNS lookup that resolves to the latest Parquet file. Renamed columns to be self-documenting and added provenance tracking. Discovered that webhook notifications to the CRM existed only in dead code — wired them into the actual ingestion flow.
 
-## Session 10 — 2026-08-23
+## Session 10 — August 24
 
-Solved the missing year-built problem with a three-tier fallback: FDOT, property appraiser, then estimation from sale year. Formalized the CRM contract so downstream systems discover data through a single IPNS lookup.
+Post-evaluation polish. Fixed address mapping issues, improved mock mode with real Jacksonville street names, and expanded year-built estimation coverage. Then raised the ingestion target from 2,000 to 400,000 properties for full county coverage. Hit memory limits immediately — first JSON parsing choked on 500MB payloads, then V8's string ceiling killed the streaming parser. Rewired ingestion to fetch live from ArcGIS with pagination, eliminating the need to hold all records in memory at once.
 
-## Session 11 — 2026-08-23
+## Session 11 — August 25
 
-Renamed Parquet columns to be self-documenting, added provenance tracking, and wrapped deploys in a Makefile.
-
-## Session 12 — 2026-08-23
-
-Discovered webhook notifications only existed in a dead code path. Wired them into the actual ingestion flow so the CRM finally gets notified after pipeline runs.
-
-## Session 13 — 2026-08-24
-
-Post-evaluation polish. Fixed address mapping, improved mock mode with real Jacksonville streets, expanded year-built estimation, and raised the ingestion ceiling to 400k for full county coverage.
-
-## Session 14 — 2026-08-24
-
-Hit the 400k wall. JSON.parse choked on 500MB, streaming fixed that, then V8's string limit killed ingestion. Rewired the pipeline to fetch live from ArcGIS with pagination instead of reading a pre-fetched file, eliminating the memory bottleneck entirely.
-
-## Session 15 — 2026-08-25
-
-Bumped the Docker heap to 6GB for full-county processing. Gave the frontend a visual refresh — swapped the near-black theme for blue with proper status badges and hover states.
+Bumped the processing container's memory ceiling for full-county runs. Gave the dashboard a visual refresh — replaced the near-black theme with blue accents and semantic color coding for status indicators. Recorded the final demo with all 399,000 properties loaded. Added viewport filtering and multi-criteria search endpoints for richer CRM integration. Documented the architecture for handoff.
