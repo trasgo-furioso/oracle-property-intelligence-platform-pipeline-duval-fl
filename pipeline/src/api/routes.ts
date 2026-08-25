@@ -115,12 +115,16 @@ export function createApiRoutes(): Hono {
          FROM data_sources`,
       );
 
-      // Determine IPNS status
+      // Fetch last successful run for IPNS status
+      const lastSuccessful = await queryOne<PipelineRun>(
+        `SELECT * FROM pipeline_runs WHERE status = 'success' ORDER BY started_at DESC LIMIT 1`,
+      );
+
       let ipnsStatus: 'live' | 'stale' | 'pending' = 'pending';
-      if (lastRun?.ipns_pointer) {
+      if (lastSuccessful?.ipns_pointer) {
         const hoursSinceRun =
-          (Date.now() - new Date(lastRun.started_at).getTime()) / (1000 * 60 * 60);
-        ipnsStatus = hoursSinceRun < 24 ? 'live' : 'stale';
+          (Date.now() - new Date(lastSuccessful.started_at).getTime()) / (1000 * 60 * 60);
+        ipnsStatus = hoursSinceRun < 48 ? 'live' : 'stale';
       }
 
       const stats: StatsResponse = {
@@ -136,11 +140,11 @@ export function createApiRoutes(): Hono {
             }
           : null,
         ipnsStatus,
-        ipnsPointer: lastRun?.ipns_pointer ?? null,
-        artifactCid: lastRun?.published_artifact_cid ?? null,
-        queryTableCid: lastRun?.query_table_cid ?? null,
-        queryTableUrl: lastRun?.query_table_cid
-          ? `https://ipfs.filebase.io/ipfs/${lastRun.query_table_cid}`
+        ipnsPointer: lastSuccessful?.ipns_pointer ?? null,
+        artifactCid: lastSuccessful?.published_artifact_cid ?? null,
+        queryTableCid: lastSuccessful?.query_table_cid ?? null,
+        queryTableUrl: lastSuccessful?.query_table_cid
+          ? `https://ipfs.filebase.io/ipfs/${lastSuccessful.query_table_cid}`
           : null,
         sourceCount: parseInt(sourceCount?.total ?? '0', 10),
         healthySources: parseInt(sourceCount?.healthy ?? '0', 10),
