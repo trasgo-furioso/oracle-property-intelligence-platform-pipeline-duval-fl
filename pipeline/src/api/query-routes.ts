@@ -316,6 +316,7 @@ queryRoutes.get('/api/properties/filter', async (c) => {
   // Numeric filters
   const numericFilters: Array<{ param: string; col: string; op: string }> = [
     { param: 'roof_age_min', col: 'roof_age_years', op: '>=' },
+    { param: 'roof_age_max', col: 'roof_age_years', op: '<=' },
     { param: 'ownership_min', col: 'ownership_tenure_years', op: '>=' },
     { param: 'value_min', col: 'assessed_value', op: '>=' },
     { param: 'value_max', col: 'assessed_value', op: '<=' },
