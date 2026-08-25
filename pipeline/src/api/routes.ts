@@ -7,7 +7,6 @@ import { Hono } from 'hono';
 import { query, queryOne } from '../lib/db.js';
 import { runIngestion } from '../lib/ingest.js';
 import type {
-  PipelineRun,
   PipelineRunStatus,
   DataSource,
   RunSource,
@@ -116,8 +115,14 @@ export function createApiRoutes(): Hono {
       );
 
       // Fetch last successful run for IPNS status
-      const lastSuccessful = await queryOne<PipelineRun>(
-        `SELECT * FROM pipeline_runs WHERE status = 'success' ORDER BY started_at DESC LIMIT 1`,
+      const lastSuccessful = await queryOne<{
+        started_at: Date;
+        published_artifact_cid: string | null;
+        ipns_pointer: string | null;
+        query_table_cid: string | null;
+      }>(
+        `SELECT started_at, published_artifact_cid, ipns_pointer, query_table_cid
+         FROM pipeline_runs WHERE status = 'success' ORDER BY started_at DESC LIMIT 1`,
       );
 
       let ipnsStatus: 'live' | 'stale' | 'pending' = 'pending';
